@@ -13,13 +13,11 @@ open Shared
 
 /// The different elements of the completed report.
 type Report =
-    { Location: LocationResponse
-      Crimes: CrimeResponse array }
+    { Location : LocationResponse
+      Crimes : CrimeResponse array
+      Weather : WeatherResponse }
 
-type ServerState =
-    | Idle
-    | Loading
-    | ServerError of string
+type ServerState = Idle | Loading | ServerError of string
 
 /// The overall data model driving the view.
 type Model =
@@ -33,6 +31,7 @@ type Msg =
     | GetReport
     | PostcodeChanged of string
     | GotReport of Report
+    | Clear
     | ErrorMsg of exn
 
 /// The init function is called to start the message pump with an initial view.
@@ -53,10 +52,11 @@ let getResponse postcode = async {
     (* Task 4.4 WEATHER: Fetch the weather from the API endpoint you created.
        Then, save its value into the Report below. You'll need to add a new
        field to the Report type first, though! *)
-
+    let! weather = dojoApi.GetWeather postcode
     return
         { Location = location
-          Crimes = crimes }
+          Crimes = crimes
+          Weather = weather }
 }
 
 /// The update function knows how to update the model given a message.
@@ -77,11 +77,14 @@ let update msg model =
 
     | PostcodeChanged p ->
         { model with
-            Postcode = p
-            (* Task 2.2 Validation. Use the Validation.isValidPostcode function to implement client-side form validation.
-               Note that the validation is the same shared code that runs on the server! *)
-            ValidationError = None }, Cmd.none
+            ValidationError = if not (Validation.isValidPostcode p) then Some "Wrong postcode" else None }, Cmd.none
 
+    | Clear ->
+        { model with
+           ValidationError = None
+           Report = None
+           ServerState = Idle
+           Postcode = "" }, Cmd.none
     | ErrorMsg e ->
         let errorAlert =
             SimpleAlert(e.Message)
@@ -145,13 +148,14 @@ module ViewParts =
     let mapWidget (lr:LocationResponse) =
         widget "Map"  [
                 PigeonMaps.map [
-                    (* Task 3.2 MAP: Set the center of the map using map.center, supply the lat/long value as input. *)
-
-                    (* Task 3.3 MAP: Update the Zoom to 15. *)
-                    map.zoom 12
+                    map.center (lr.Location.LatLong.Latitude, lr.Location.LatLong.Longitude)
+                    (* Task 3.2 MAP: Set the center of the map using map.center, supply the lat/long value as input.
+                       Task 3.3 MAP: Update the Zoom to 15. *)
+                    map.zoom 15
                     map.height 500
                     map.markers [
                         (* Task 3.4 MAP: Create a marker for the map. Use the makeMarker function above. *)
+                        makeMarker (lr.Location.LatLong.Latitude, lr.Location.LatLong.Longitude)
                     ]
             ]
         ]
@@ -163,7 +167,7 @@ module ViewParts =
                     prop.children [
                         Html.img [
                             prop.style [ style.height 100]
-                            prop.src (sprintf "https://www.metaweather.com/static/img/weather/%s.svg" weatherReport.WeatherType.Abbreviation) ]
+                            prop.src $"https://www.metaweather.com/static/img/weather/%s{weatherReport.WeatherType.Abbreviation}.svg" ]
                         ]
                     ]
                 Bulma.table [
@@ -178,7 +182,8 @@ module ViewParts =
                                    and display it here instead of an empty string.
                                    Hint: Use sprintf with "%.2f" to round the temperature to 2 decimal points
                                    (look at the locationWidget for an example) *)
-                                Html.td ""
+
+                                Html.td $"%.2f{weatherReport.AverageTemperature}"
                             ]
                         ]
                     ]
@@ -295,7 +300,16 @@ let view (model: Model) dispatch =
                                         prop.onClick (fun _ -> dispatch GetReport)
                                         prop.disabled (model.ValidationError.IsSome)
                                         if (model.ServerState = Loading) then button.isLoading
-                                        prop.text "Fetch"
+                                        prop.text "Submit"
+                                    ]
+                            ]
+                            Bulma.control.div [
+                                    Bulma.button.a [
+                                        color.isWarning
+                                        prop.onClick (fun _ -> dispatch Clear)
+                                        prop.disabled (model.ValidationError.IsSome)
+                                        if (model.ServerState = Loading) then button.isLoading
+                                        prop.text "Clear"
                                     ]
                                 ]
                             ]
@@ -319,11 +333,19 @@ let view (model: Model) dispatch =
                                         ]
                                     ]
                                     Bulma.column [
+                                            column.isThreeFifths
+                                            prop.children [
+                                                weatherWidget report.Weather
+                                            ]
                                         (* Task 4.5 WEATHER: Generate the view code for the weather tile
                                            using the weatherWidget function, supplying the weather data
                                            from the report value, and include it here as part of the list *)
                                     ]
                                 ]
+                                Bulma.column [
+                                    prop.children [ mapWidget report.Location ]
+                                ]
+
                                 (* Task 3.1 MAP: Call the mapWidget function here, which creates a
                                    widget to display a map using the React ReCharts component. The function
                                    takes in a LocationResponse value as input and returns a ReactElement. *)
